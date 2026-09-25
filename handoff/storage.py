@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from threading import Lock
 
@@ -33,7 +35,16 @@ class JsonFileStateStore:
             data = self._read_all()
             data[session_id] = state
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+            content = json.dumps(data, indent=2, sort_keys=True)
+            with tempfile.NamedTemporaryFile(
+                "w",
+                delete=False,
+                dir=self.path.parent,
+                encoding="utf-8",
+            ) as temp_file:
+                temp_file.write(content)
+                temp_name = temp_file.name
+            os.replace(temp_name, self.path)
 
     def _read_all(self) -> dict[str, AgentState]:
         if not self.path.exists():

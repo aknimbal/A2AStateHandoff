@@ -3,9 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
-from typing import Any
-
-from .agent_framework import Agent, AgentContext, AgentResult, HandoffOrchestrator
+from .agent_framework import Agent, AgentContext, AgentResult, HandoffOrchestrator, StateStore
 from .storage import InMemoryStateStore, JsonFileStateStore
 
 
@@ -15,7 +13,7 @@ CATALOG = {
 }
 
 
-def build_orchestrator(state_store: Any | None = None) -> HandoffOrchestrator:
+def build_orchestrator(state_store: StateStore | None = None) -> HandoffOrchestrator:
     return HandoffOrchestrator(
         agents=[
             Agent("intake", "Capture buyer intent and normalize the order request.", _intake_agent),
@@ -95,7 +93,6 @@ def _confirmation_agent(context: AgentContext) -> AgentResult:
     }
     context.state.setdefault("orders", []).append(order)
     context.state["status"] = "completed"
-    context.state["next_agent"] = None
     return AgentResult(f"Order {order['id']} placed for ${order['total']:.2f}.", stop=True)
 
 

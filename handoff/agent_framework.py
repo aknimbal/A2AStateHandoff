@@ -70,7 +70,13 @@ class HandoffOrchestrator:
             agent_name = state.get("next_agent")
             if not agent_name:
                 break
-            agent = self.agents[agent_name]
+            agent = self.agents.get(agent_name)
+            if not agent:
+                state["status"] = "stopped"
+                state["stop_reason"] = "unknown_agent"
+                state["last_response"] = f"Unknown next agent: {agent_name}."
+                state["next_agent"] = None
+                break
             result = agent.run(context)
             state.setdefault("history", []).append(
                 {
