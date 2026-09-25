@@ -66,7 +66,10 @@ class HandoffOrchestrator:
 
         context = _Context(state=state, message=message, buyer_confirmed=buyer_confirmed)
         turns = 0
-        while turns < self.max_turns and not self._should_stop(state):
+        # Exits when state is terminal, no handoff remains, an agent stops, or max_turns is reached.
+        while turns < self.max_turns:
+            if self._should_stop(state):
+                break
             agent_name = state.get("next_agent")
             if not agent_name:
                 break
@@ -90,11 +93,11 @@ class HandoffOrchestrator:
             if result.stop:
                 break
             turns += 1
-        else:
-            if turns >= self.max_turns:
-                state["status"] = "stopped"
-                state["stop_reason"] = "max_turns"
-                state["next_agent"] = None
+
+        if turns >= self.max_turns and not self._should_stop(state) and state.get("next_agent"):
+            state["status"] = "stopped"
+            state["stop_reason"] = "max_turns"
+            state["next_agent"] = None
 
         self.state_store.save(session_id, state)
         return state

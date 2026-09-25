@@ -14,7 +14,7 @@ class InMemoryStateStore:
         self._sessions: dict[str, AgentState] = {}
 
     def load(self, session_id: str) -> AgentState:
-        return dict(self._sessions.get(session_id, {}))
+        return json.loads(json.dumps(self._sessions.get(session_id, {})))
 
     def save(self, session_id: str, state: AgentState) -> None:
         self._sessions[session_id] = json.loads(json.dumps(state))
@@ -36,15 +36,21 @@ class JsonFileStateStore:
             data[session_id] = state
             self.path.parent.mkdir(parents=True, exist_ok=True)
             content = json.dumps(data, indent=2, sort_keys=True)
-            with tempfile.NamedTemporaryFile(
-                "w",
-                delete=False,
-                dir=self.path.parent,
-                encoding="utf-8",
-            ) as temp_file:
-                temp_file.write(content)
-                temp_name = temp_file.name
-            os.replace(temp_name, self.path)
+            temp_name = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    "w",
+                    delete=False,
+                    dir=self.path.parent,
+                    encoding="utf-8",
+                ) as temp_file:
+                    temp_file.write(content)
+                    temp_name = temp_file.name
+                os.replace(temp_name, self.path)
+            except Exception:
+                if temp_name:
+                    Path(temp_name).unlink(missing_ok=True)
+                raise
 
     def _read_all(self) -> dict[str, AgentState]:
         if not self.path.exists():
