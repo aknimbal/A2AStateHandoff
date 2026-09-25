@@ -21,9 +21,13 @@ class InMemoryStateStore:
 
 
 class JsonFileStateStore:
+    _locks: dict[Path, Lock] = {}
+    _locks_guard = Lock()
+
     def __init__(self, path: str | Path) -> None:
-        self.path = Path(path)
-        self._lock = Lock()
+        self.path = Path(path).resolve()
+        with self._locks_guard:
+            self._lock = self._locks.setdefault(self.path, Lock())
 
     def load(self, session_id: str) -> AgentState:
         with self._lock:

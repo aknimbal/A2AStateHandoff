@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import tempfile
 from typing import Any
 
 from .agent_framework import Agent, AgentContext, AgentResult, HandoffOrchestrator, StateStore
@@ -29,7 +30,8 @@ def build_orchestrator(state_store: StateStore | None = None) -> HandoffOrchestr
 
 
 def _default_store() -> JsonFileStateStore:
-    path = os.environ.get("STATE_STORE_PATH", "/tmp/a2a_state_handoff/state.json")
+    default_path = os.path.join(tempfile.gettempdir(), "a2a_state_handoff", "state.json")
+    path = os.environ.get("STATE_STORE_PATH", default_path)
     return JsonFileStateStore(path)
 
 

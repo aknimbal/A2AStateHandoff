@@ -1,8 +1,9 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from function_app import _validate_payload
+from function_app import _validate_payload, invoke_orchestrator
 from handoff.orchestrator import build_orchestrator
 from handoff.storage import InMemoryStateStore, JsonFileStateStore
 
@@ -53,6 +54,26 @@ class OrchestratorTests(unittest.TestCase):
     def test_function_payload_validation_rejects_invalid_types(self):
         with self.assertRaisesRegex(ValueError, "message"):
             _validate_payload({"session_id": "s1", "message": 123})
+
+    def test_invoke_orchestrator_shapes_http_response(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            old_path = os.environ.get("STATE_STORE_PATH")
+            os.environ["STATE_STORE_PATH"] = str(Path(temp_dir) / "state.json")
+            try:
+                result = invoke_orchestrator({"session_id": "http-1", "message": "buy 1 widget"})
+            finally:
+                if old_path is None:
+                    os.environ.pop("STATE_STORE_PATH", None)
+                else:
+                    os.environ["STATE_STORE_PATH"] = old_path
+
+        self.assertEqual("http-1", result["session_id"])
+        self.assertEqual("awaiting_confirmation", result["status"])
+        self.assertEqual("confirmation", result["next_agent"])
+        self.assertIn("Quote ready", result["response"])
+        self.assertEqual("widget", result["shared"]["quote"]["item"])
+        self.assertEqual([], result["orders"])
+        self.assertEqual(["intake", "inventory", "quote"], [entry["agent"] for entry in result["history"]])
 
 
 if __name__ == "__main__":
