@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from threading import Lock
+
+from .agent_framework import AgentState
+
+
+class InMemoryStateStore:
+    def __init__(self) -> None:
+        self._sessions: dict[str, AgentState] = {}
+
+    def load(self, session_id: str) -> AgentState:
+        return dict(self._sessions.get(session_id, {}))
+
+    def save(self, session_id: str, state: AgentState) -> None:
+        self._sessions[session_id] = json.loads(json.dumps(state))
+
+
+class JsonFileStateStore:
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self._lock = Lock()
+
+    def load(self, session_id: str) -> AgentState:
+        with self._lock:
+            data = self._read_all()
+            return data.get(session_id, {})
+
+    def save(self, session_id: str, state: AgentState) -> None:
+        with self._lock:
+            data = self._read_all()
+            data[session_id] = state
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _read_all(self) -> dict[str, AgentState]:
+        if not self.path.exists():
+            return {}
+        content = self.path.read_text(encoding="utf-8")
+        if not content.strip():
+            return {}
+        return json.loads(content)
