@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 .python_packages/
 local.settings.json
+.env
+.env.*
+!.env.example
+.local/

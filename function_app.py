@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from typing import Mapping
 
-from handoff import build_orchestrator
+from handoff import AuthError, authenticate_request, build_orchestrator
 
 try:
     import azure.functions as func
@@ -10,17 +11,33 @@ except ImportError:  # pragma: no cover - Azure Functions imports this at runtim
     func = None
 
 
-def invoke_orchestrator(payload: object) -> dict:
+FORBIDDEN_STOP_REASONS = {"insufficient_scope", "invalid_handoff_token"}
+
+
+def invoke_orchestrator(payload: object, headers: Mapping[str, str] | None = None) -> dict:
     session_id, message, buyer_confirmed = _validate_payload(payload)
-    state = build_orchestrator().run(session_id, message, buyer_confirmed=buyer_confirmed)
+    principal = authenticate_request(headers or {})
+    state = build_orchestrator().run(
+        session_id,
+        message,
+        buyer_confirmed=buyer_confirmed,
+        principal=principal,
+    )
+    auth_state = state.get("auth", {})
     return {
         "session_id": state["session_id"],
         "status": state["status"],
+        "stop_reason": state.get("stop_reason"),
         "next_agent": state.get("next_agent"),
         "response": state.get("last_response"),
         "shared": state.get("shared", {}),
         "orders": state.get("orders", []),
         "history": state.get("history", []),
+        "auth": {
+            "client_id": auth_state.get("client_id"),
+            "scopes": auth_state.get("scopes", []),
+            "delegation_chain": auth_state.get("delegation_chain", []),
+        },
     }
 
 
@@ -48,7 +65,18 @@ if func:
     def orchestrate(req: func.HttpRequest) -> func.HttpResponse:
         try:
             payload = req.get_json()
-            result = invoke_orchestrator(payload)
+            result = invoke_orchestrator(payload, dict(req.headers))
+        except AuthError as exc:
+            return _error_response(str(exc), exc.status_code)
         except ValueError as exc:
-            return func.HttpResponse(str(exc), status_code=400)
-        return func.HttpResponse(json.dumps(result), mimetype="application/json")
+            return _error_response(str(exc), 400)
+
+        status_code = 403 if result.get("stop_reason") in FORBIDDEN_STOP_REASONS else 200
+        return func.HttpResponse(json.dumps(result), status_code=status_code, mimetype="application/json")
+
+    def _error_response(message: str, status_code: int) -> "func.HttpResponse":
+        return func.HttpResponse(
+            json.dumps({"error": message}),
+            status_code=status_code,
+            mimetype="application/json",
+        )

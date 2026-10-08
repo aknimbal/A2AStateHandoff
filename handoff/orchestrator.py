@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import tempfile
+import sys
 from typing import Any
 
 from .agent_framework import Agent, AgentContext, AgentResult, HandoffOrchestrator, StateStore
+from .auth import AuthError, authenticate
+from .config import get_settings
 from .storage import InMemoryStateStore, JsonFileStateStore
 
 
@@ -17,22 +19,28 @@ CATALOG = {
 
 
 def build_orchestrator(state_store: StateStore | None = None) -> HandoffOrchestrator:
+    settings = get_settings()
+    handlers = {
+        "intake": ("Capture buyer intent and normalize the order request.", _intake_agent),
+        "inventory": ("Validate requested inventory from shared state.", _inventory_agent),
+        "quote": ("Prepare a quote and require buyer confirmation.", _quote_agent),
+        "confirmation": ("Create the order only after explicit buyer confirmation.", _confirmation_agent),
+    }
+    agents = [
+        Agent(name, instructions, handler, required_scope=settings.scope_for(name))
+        for name, (instructions, handler) in handlers.items()
+    ]
     return HandoffOrchestrator(
-        agents=[
-            Agent("intake", "Capture buyer intent and normalize the order request.", _intake_agent),
-            Agent("inventory", "Validate requested inventory from shared state.", _inventory_agent),
-            Agent("quote", "Prepare a quote and require buyer confirmation.", _quote_agent),
-            Agent("confirmation", "Create the order only after explicit buyer confirmation.", _confirmation_agent),
-        ],
+        agents=agents,
         state_store=state_store or _default_store(),
         stop_conditions=[_is_terminal, _awaits_confirmation],
+        entry_agent=os.environ.get("AGENT_ENTRY_POINT", "intake"),
+        settings=settings,
     )
 
 
 def _default_store() -> JsonFileStateStore:
-    default_path = os.path.join(tempfile.gettempdir(), "a2a_state_handoff", "state.json")
-    path = os.environ.get("STATE_STORE_PATH", default_path)
-    return JsonFileStateStore(path)
+    return JsonFileStateStore(get_settings().state_store_path)
 
 
 def _intake_agent(context: AgentContext) -> AgentResult:
@@ -124,10 +132,27 @@ def main() -> None:
     parser.add_argument("--session-id", default="local-session")
     parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--memory", action="store_true", help="Use in-memory storage instead of JSON persistence.")
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="Client credential. Defaults to the CLIENT_TOKEN value from the environment/.env file.",
+    )
     args = parser.parse_args()
 
-    store = InMemoryStateStore() if args.memory else None
-    state = build_orchestrator(store).run(args.session_id, args.message, buyer_confirmed=args.confirm)
+    settings = get_settings()
+    credential = args.token if args.token is not None else os.environ.get("CLIENT_TOKEN", "")
+    try:
+        principal = authenticate(credential, settings)
+        store = InMemoryStateStore() if args.memory else None
+        state = build_orchestrator(store).run(
+            args.session_id,
+            args.message,
+            buyer_confirmed=args.confirm,
+            principal=principal,
+        )
+    except AuthError as exc:
+        print(f"auth error ({exc.status_code}): {exc}", file=sys.stderr)
+        raise SystemExit(1)
     print(state["last_response"])
 
 
